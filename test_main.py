@@ -109,3 +109,47 @@ def test_main_integration(tmp_path: Path, monkeypatch, capsys):
     assert "Directory Size Analysis Summary" in output
     assert "TOTAL" in output
     assert "2.05 KB" in output # 2100 bytes total
+
+def test_nested_target_folders_size_calculation(tmp_path: Path, monkeypatch, capsys):
+    """
+    Tests that the script correctly calculates the size of nested target folders,
+    ensuring the parent folder's size excludes the nested one's.
+    """
+    # --- Setup ---
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    project_nested = projects_root / "project_nested"
+    project_nested.mkdir()
+
+    # Create nested structure: "Data in" contains "Email"
+    data_in_dir = project_nested / "Data in"
+    data_in_dir.mkdir()
+    (data_in_dir / "some_file.txt").write_text("a" * 1024)  # 1 KB
+
+    email_dir = data_in_dir / "Email"
+    email_dir.mkdir()
+    (email_dir / "email_content.txt").write_text("b" * 512) # 0.5 KB
+
+    # --- Execution ---
+    # Mock sys.argv to run the script on our test directory
+    monkeypatch.setattr(sys, "argv", ["main.py", str(projects_root), "-t", "Data in", "Email"])
+    main()
+
+    # --- Assertion ---
+    captured = capsys.readouterr()
+    output = captured.out
+
+    # The size of "Data in" should be 1.00 KB (excluding "Email")
+    # The size of "Email" should be 512 B
+    # Total should be 1.50 KB
+
+    # Let's check for the specific lines in the summary table
+    # We use regex to be flexible with whitespace
+    import re
+    data_in_line_found = re.search(r"\|\s*project_nested\s*\|\s*Data in\s*\|\s*1.00 KB\s*\|", output)
+    email_line_found = re.search(r"\|\s*project_nested\s*\|\s*Email\s*\|\s*512 B\s*\|", output)
+    total_line_found = re.search(r"\|\s*TOTAL\s*\|\s*1.50 KB\s*\|", output)
+
+    assert data_in_line_found, "The output for 'Data in' should show 1.00 KB"
+    assert email_line_found, "The output for 'Email' should show 512 B"
+    assert total_line_found, "The total size should be correctly calculated as 1.50 KB"
