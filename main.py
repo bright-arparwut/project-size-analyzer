@@ -131,9 +131,9 @@ def find_target_folders_in_project(project_dir: Path, targets: Set[str]) -> List
             if normalize_name(d) in targets:
                 found_path = Path(root) / d
                 found_paths.append(found_path)
-                # Once a target folder is found, stop searching deeper into it
-                # by removing it from the list of dirs that os.walk will traverse next.
-                dirs.remove(d)
+                # Do not prune the directory, so we can find nested target folders.
+                # For example, if 'Email' is a target and it's inside 'Data in',
+                # we still want to find it.
     return found_paths
 
 def main() -> None:
@@ -187,6 +187,23 @@ def main() -> None:
                 "size_bytes": size,
                 "size_readable": format_bytes(size)
             })
+
+    # --- Adjust sizes for nested target folders ---
+    # Create a copy of the results to iterate over while modifying the original
+    results_copy = list(all_results)
+    for parent_result in all_results:
+        for child_result in results_copy:
+            # If the child is different from the parent and is inside the parent's path
+            if parent_result["full_path"] != child_result["full_path"] and \
+               child_result["full_path"].is_relative_to(parent_result["full_path"]):
+
+                # Subtract the child's size from the parent's size
+                parent_result["size_bytes"] -= child_result["size_bytes"]
+
+    # After adjusting, re-format the human-readable size string
+    for result in all_results:
+        result["size_readable"] = format_bytes(result["size_bytes"])
+
 
     # --- Display Summary ---
     print("\n" + "=" * 80)
