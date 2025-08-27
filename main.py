@@ -2,10 +2,15 @@ from pathlib import Path
 import sys
 import os
 import argparse
+import re
 from typing import List, Set, Dict, Any
 
 # --- Default Configuration ---
 DEFAULT_TARGET_FOLDERS = ["dist", "build", "node_modules"]
+
+def normalize_name(name: str) -> str:
+    """Normalizes a name for comparison by lowercasing and removing non-alphanumeric chars."""
+    return re.sub(r'[^a-z0-9]', '', name.lower())
 
 def parse_arguments() -> argparse.Namespace:
     """Parses command-line arguments."""
@@ -63,7 +68,7 @@ def get_folder_size(folder_path: Path) -> int:
 def find_target_folders_in_project(project_dir: Path, targets: Set[str]) -> List[Path]:
     """
     Finds all specified target folders within a given project directory.
-    The search is case-insensitive.
+    The search is case-insensitive, and ignores whitespace and special characters.
     """
     found_paths: List[Path] = []
     # os.walk is used because it allows "pruning" the search,
@@ -72,7 +77,7 @@ def find_target_folders_in_project(project_dir: Path, targets: Set[str]) -> List
         # Create a copy of dirs to loop over, while modifying the original
         current_dirs = list(dirs)
         for d in current_dirs:
-            if d.lower() in targets:
+            if normalize_name(d) in targets:
                 found_path = Path(root) / d
                 found_paths.append(found_path)
                 # Once a target folder is found, stop searching deeper into it
@@ -96,8 +101,8 @@ def main() -> None:
     print(f"Target folders: {', '.join(target_folders)} (case-insensitive)")
     print("-" * 50)
 
-    # Convert targets to a lowercase set for case-insensitive matching
-    target_set = {t.lower() for t in target_folders}
+    # Convert targets to a normalized set for insensitive matching
+    target_set = {normalize_name(t) for t in target_folders}
     all_results: List[Dict[str, Any]] = []
 
     # Discover project directories directly under the root

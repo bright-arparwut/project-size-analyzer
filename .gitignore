@@ -1,1 +1,3 @@
 test_projects
+__pycache__/
+.pytest_cache/
