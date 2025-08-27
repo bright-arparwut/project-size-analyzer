@@ -63,6 +63,7 @@ def get_folder_size(folder_path: Path) -> int:
 def find_target_folders_in_project(project_dir: Path, targets: Set[str]) -> List[Path]:
     """
     Finds all specified target folders within a given project directory.
+    The search is case-insensitive.
     """
     found_paths: List[Path] = []
     # os.walk is used because it allows "pruning" the search,
@@ -71,7 +72,7 @@ def find_target_folders_in_project(project_dir: Path, targets: Set[str]) -> List
         # Create a copy of dirs to loop over, while modifying the original
         current_dirs = list(dirs)
         for d in current_dirs:
-            if d in targets:
+            if d.lower() in targets:
                 found_path = Path(root) / d
                 found_paths.append(found_path)
                 # Once a target folder is found, stop searching deeper into it
@@ -92,10 +93,11 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Scanning projects in: {projects_root_dir}")
-    print(f"Target folders: {', '.join(target_folders)}")
+    print(f"Target folders: {', '.join(target_folders)} (case-insensitive)")
     print("-" * 50)
 
-    target_set = set(target_folders)
+    # Convert targets to a lowercase set for case-insensitive matching
+    target_set = {t.lower() for t in target_folders}
     all_results: List[Dict[str, Any]] = []
 
     # Discover project directories directly under the root
