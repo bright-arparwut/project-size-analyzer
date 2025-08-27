@@ -1,14 +1,34 @@
 from pathlib import Path
 import sys
 import os
+import argparse
+from typing import List, Set, Dict, Any
 
-# --- User Configuration ---
-PROJECTS_ROOT_DIR = Path("./example_projects") # เปลี่ยนเป็นพาธจริงของคุณ
-TARGET_FOLDERS = ["dist", "build", "node_modules"]
+# --- Default Configuration ---
+DEFAULT_TARGET_FOLDERS = ["dist", "build", "node_modules"]
+
+def parse_arguments() -> argparse.Namespace:
+    """Parses command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Find and report the size of specified subfolders in a projects directory.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        "root_dir",
+        type=Path,
+        help="The root directory containing the projects to scan."
+    )
+    parser.add_argument(
+        "-t", "--targets",
+        nargs='+',
+        default=DEFAULT_TARGET_FOLDERS,
+        help="A list of target folder names to search for."
+    )
+    return parser.parse_args()
 
 def format_bytes(size_bytes: int) -> str:
     """
-    แปลงขนาดไฟล์จากไบต์เป็นหน่วยที่มนุษย์อ่านเข้าใจง่าย (KB, MB, GB, etc.)
+    Converts a size in bytes to a human-readable format (KB, MB, GB, etc.).
     """
     if size_bytes < 1024:
         return f"{size_bytes} B"
@@ -20,107 +40,125 @@ def format_bytes(size_bytes: int) -> str:
 
 def get_folder_size(folder_path: Path) -> int:
     """
-    คำนวณขนาดรวมของไฟล์ทั้งหมดในโฟลเดอร์ที่กำหนด (รวมโฟลเดอร์ย่อย)
-    โดยไม่นับ symbolic links เพื่อป้องกันการนับซ้ำและการวนซ้ำไม่รู้จบ
+    Calculates the total size of all files in a given folder (including subfolders)
+    using os.walk for efficiency. It does not count symbolic links to prevent
+    double counting and infinite loops.
     """
     total_size = 0
     try:
-        for item in folder_path.rglob('*'):
-            # ตรวจสอบว่าเป็นไฟล์และไม่ใช่ symbolic link
-            if item.is_file() and not item.is_symlink():
-                try:
-                    total_size += item.stat().st_size
-                except (OSError, FileNotFoundError) as e:
-                    print(f"  ไม่สามารถเข้าถึงไฟล์: {item} ({e})", file=sys.stderr)
+        for dirpath, _, filenames in os.walk(folder_path):
+            for filename in filenames:
+                file_path = Path(dirpath) / filename
+                # Check if it's a file and not a symbolic link before getting size
+                if file_path.is_file() and not file_path.is_symlink():
+                    try:
+                        total_size += file_path.stat().st_size
+                    except (OSError, FileNotFoundError) as e:
+                        print(f"  Could not access file: {file_path} ({e})", file=sys.stderr)
     except PermissionError as e:
-        print(f"  ไม่มีสิทธิ์เข้าถึง: {folder_path} ({e})", file=sys.stderr)
+        # This will catch permission errors for the top-level folder_path
+        print(f"  Permission denied to access: {folder_path} ({e})", file=sys.stderr)
     return total_size
 
-def find_target_folders_in_project(project_dir: Path, targets: set) -> list[Path]:
+def find_target_folders_in_project(project_dir: Path, targets: Set[str]) -> List[Path]:
     """
-    ค้นหาโฟลเดอร์เป้าหมายทั้งหมดภายในไดเรกทอรีโปรเจกต์ที่กำหนด
+    Finds all specified target folders within a given project directory.
     """
-    found_paths = []
-    # ใช้ os.walk เพราะสามารถ "ตัดกิ่ง" การค้นหาได้
-    # ซึ่งมีประสิทธิภาพกว่า rglob สำหรับกรณีนี้
+    found_paths: List[Path] = []
+    # os.walk is used because it allows "pruning" the search,
+    # which is more efficient than rglob for this case.
     for root, dirs, _ in os.walk(project_dir):
-        # สร้างสำเนาของ dirs เพื่อวนลูป และแก้ไขตัวจริง
+        # Create a copy of dirs to loop over, while modifying the original
         current_dirs = list(dirs)
         for d in current_dirs:
             if d in targets:
                 found_path = Path(root) / d
                 found_paths.append(found_path)
-                # เมื่อพบโฟลเดอร์เป้าหมาย ให้หยุดค้นหาลึกลงไปในโฟลเดอร์นั้น
-                # โดยการลบออกจากลิสต์ dirs ที่ os.walk จะใช้ต่อไป
+                # Once a target folder is found, stop searching deeper into it
+                # by removing it from the list of dirs that os.walk will traverse next.
                 dirs.remove(d)
     return found_paths
 
-def main():
+def main() -> None:
     """
-    ฟังก์ชันหลักในการดำเนินงาน: ค้นหาและคำนวณขนาดของโฟลเดอร์เป้าหมาย
+    Main function to run the operation: find and calculate the size of target folders.
     """
-    if not PROJECTS_ROOT_DIR.is_dir():
-        print(f"[Error] ไดเรกทอรีโปรเจกต์ไม่พบ: {PROJECTS_ROOT_DIR}", file=sys.stderr)
+    args = parse_arguments()
+    projects_root_dir = args.root_dir
+    target_folders = args.targets
+
+    if not projects_root_dir.is_dir():
+        print(f"[Error] Project root directory not found: {projects_root_dir}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"กำลังสแกนโปรเจกต์ใน: {PROJECTS_ROOT_DIR}")
-    print(f"โฟลเดอร์เป้าหมาย: {', '.join(TARGET_FOLDERS)}")
+    print(f"Scanning projects in: {projects_root_dir}")
+    print(f"Target folders: {', '.join(target_folders)}")
     print("-" * 50)
 
-    target_set = set(TARGET_FOLDERS)
-    all_results = []
+    target_set = set(target_folders)
+    all_results: List[Dict[str, Any]] = []
 
-    # ค้นหาโปรเจกต์ที่อาจซ้อนกันอยู่หนึ่งระดับ (เช่น YEAR/PROJECT_NAME)
-    project_dirs = []
+    # Discover project directories directly under the root
+    try:
+        project_dirs = [d for d in projects_root_dir.iterdir() if d.is_dir()]
+    except FileNotFoundError:
+        print(f"[Error] Root directory not found: {projects_root_dir}", file=sys.stderr)
+        sys.exit(1)
+    except PermissionError:
+        print(f"[Error] Permission denied to read directory: {projects_root_dir}", file=sys.stderr)
+        sys.exit(1)
 
     for project_dir in project_dirs:
-        print(f"\n[+] กำลังประมวลผลโปรเจกต์: {project_dir.name}")
+        print(f"\n[+] Processing project: {project_dir.name}")
         found_folders = find_target_folders_in_project(project_dir, target_set)
 
         if not found_folders:
-            print("  ไม่พบโฟลเดอร์เป้าหมายในโปรเจกต์นี้")
+            print("  No target folders found in this project.")
             continue
 
         for folder_path in found_folders:
-            print(f"  -> พบ '{folder_path.name}' ที่: {folder_path.relative_to(PROJECTS_ROOT_DIR)}")
-            print(f"     กำลังคำนวณขนาด...")
+            relative_path = folder_path.relative_to(projects_root_dir)
+            print(f"  -> Found '{folder_path.name}' at: {relative_path}")
+            print("     Calculating size...")
             size = get_folder_size(folder_path)
             all_results.append({
                 "project": project_dir.name,
                 "target_name": folder_path.name,
                 "full_path": folder_path,
+                "relative_path": relative_path,
                 "size_bytes": size,
                 "size_readable": format_bytes(size)
             })
 
-    # แสดงผลสรุป
+    # --- Display Summary ---
     print("\n" + "=" * 80)
-    print(" สรุปผลการวิเคราะห์ขนาดไดเรกทอรี")
+    print(" Directory Size Analysis Summary")
     print("=" * 80)
 
     if not all_results:
-        print("ไม่พบโฟลเดอร์เป้าหมายใดๆ ในทุกโปรเจกต์")
+        print("No target folders were found in any project.")
         return
 
-    # จัดเรียงผลลัพธ์ตามขนาดจากมากไปน้อย
+    # Sort results by size from largest to smallest
     sorted_results = sorted(all_results, key=lambda x: x["size_bytes"], reverse=True)
+    total_size_bytes = sum(r["size_bytes"] for r in sorted_results)
 
-    # พิมพ์ตารางสรุป
-    header = "| {:<20} | {:<15} | {:<20} | {:<50} |".format(
-        "Project Root", "Target Folder", "Total Size", "Full Path"
-    )
+    # Print summary table
+    header = f"| {'Project Root':<20} | {'Target Folder':<15} | {'Total Size':>20} | {'Full Path':<50} |"
     print(header)
-    print("|" + "-" * 22 + "|" + "-" * 17 + "|" + "-" * 22 + "|" + "-" * 52 + "|")
+    print(f"|{'-'*22}|{'-'*17}|{'-'*22}|{'-'*52}|")
 
     for result in sorted_results:
-        row = "| {:<20} | {:<15} | {:>20} | {:<50} |".format(
-            result["project"],
-            result["target_name"],
-            result["size_readable"],
-            str(result["full_path"].relative_to(PROJECTS_ROOT_DIR))
-        )
+        row = f"| {result['project']:<20} | {result['target_name']:<15} | {result['size_readable']:>20} | {str(result['relative_path']):<50} |"
         print(row)
-    print("-" * (len(header) - 1))
+
+    # --- Print Total ---
+    print(f"|{'-'*113}|")
+    total_readable = format_bytes(total_size_bytes)
+    total_line = f"| {'TOTAL':<38} | {total_readable:>20} | {'':<50} |"
+    print(total_line)
+    print("-" * len(header))
+
 
 if __name__ == "__main__":
     main()
