@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 import re
+import csv
 from typing import List, Set, Dict, Any
 
 # --- Default Configuration ---
@@ -80,6 +81,11 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULT_TARGET_FOLDERS,
         help="A list of target folder names to search for."
     )
+    parser.add_argument(
+        "--export-csv",
+        type=Path,
+        help="Export the results to a CSV file at the specified path."
+    )
     return parser.parse_args()
 
 def format_bytes(size_bytes: int) -> str:
@@ -135,6 +141,38 @@ def find_target_folders_in_project(project_dir: Path, targets: Set[str]) -> List
                 # For example, if 'Email' is a target and it's inside 'Data in',
                 # we still want to find it.
     return found_paths
+
+def export_to_csv(results: List[Dict[str, Any]], output_file: Path) -> None:
+    """Exports the analysis results to a CSV file."""
+    if not results:
+        print("No results to export.", file=sys.stderr)
+        return
+
+    # Make sure the parent directory exists
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            # Define the fieldnames from the keys of the first result dictionary
+            # This makes it robust if the dictionary structure changes.
+            fieldnames = [
+                "project",
+                "target_name",
+                "size_bytes",
+                "size_readable",
+                "relative_path",
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for result in results:
+                # We only want to write a subset of the data
+                row_data = {key: result[key] for key in fieldnames}
+                writer.writerow(row_data)
+        print(f"\nSuccessfully exported results to: {output_file}")
+
+    except (IOError, OSError) as e:
+        print(f"\n[Error] Failed to write to CSV file: {e}", file=sys.stderr)
 
 def main() -> None:
     """
@@ -233,6 +271,10 @@ def main() -> None:
     total_line = f"| {'TOTAL':<38} | {total_readable:>20} | {'':<50} |"
     print(total_line)
     print("-" * len(header))
+
+    # --- Export to CSV if requested ---
+    if args.export_csv:
+        export_to_csv(sorted_results, args.export_csv)
 
 
 if __name__ == "__main__":
